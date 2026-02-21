@@ -1,4 +1,5 @@
 import os
+import time
 import urllib3
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -14,13 +15,21 @@ FMG_API_KEY = os.getenv("FMG_API_KEY")
 mcp = FastMCP("Fortinet FortiManager", host="0.0.0.0", port=8000)
 
 
-def _fmg_get(endpoint: str) -> list:
-    """Connect to FortiManager, execute a GET request, return data."""
-    with FortiManager(FMG_HOST, apikey=FMG_API_KEY, verify_ssl=False) as fmg:
-        status, data = fmg.get(endpoint)
-        if status != 0:
-            raise RuntimeError(f"FortiManager API error (status {status}): {data}")
-        return data
+def _fmg_get(endpoint: str, retries: int = 3, retry_delay: float = 5.0) -> list:
+    """Connect to FortiManager, execute a GET request, return data.
+
+    Retries up to `retries` times with `retry_delay` second intervals on
+    status -11 ('No permission for the resource'), a known FortiManager bug.
+    """
+    for attempt in range(retries + 1):
+        with FortiManager(FMG_HOST, apikey=FMG_API_KEY, verify_ssl=False) as fmg:
+            status, data = fmg.get(endpoint)
+        if status == 0:
+            return data
+        if status == -11 and attempt < retries:
+            time.sleep(retry_delay)
+            continue
+        raise RuntimeError(f"FortiManager API error (status {status}): {data}")
 
 
 @mcp.tool()
