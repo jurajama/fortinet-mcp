@@ -58,5 +58,45 @@ def list_devices(adom: str) -> list[dict]:
     ]
 
 
+@mcp.tool()
+def get_device_interfaces(adom: str, device: str) -> list[dict]:
+    """Get network interfaces for a FortiGate device managed by FortiManager.
+
+    Reads interface configuration from FortiManager's stored config database.
+
+    Args:
+        adom: The ADOM name the device belongs to (e.g. 'fin-3001126209').
+        device: The device name as it appears in FortiManager (e.g. 'FGT-BRANCH-01').
+
+    Returns a list of interfaces, each with:
+        name, ip, netmask, type, status, alias, description,
+        vlanid (int or None), parent_interface (str, for VLAN interfaces).
+    """
+    data = _fmg_get(f"/pm/config/device/{device}/global/system/interface")
+    if isinstance(data, dict):
+        data = [data]
+    result = []
+    for iface in data:
+        ip_raw = iface.get("ip", "")
+        if isinstance(ip_raw, list):
+            parts = ip_raw
+        elif isinstance(ip_raw, str):
+            parts = ip_raw.split() if ip_raw else []
+        else:
+            parts = []
+        result.append({
+            "name": iface["name"],
+            "ip": parts[0] if len(parts) > 0 else "",
+            "netmask": parts[1] if len(parts) > 1 else "",
+            "type": iface.get("type", ""),
+            "status": iface.get("status", ""),
+            "alias": iface.get("alias", ""),
+            "description": iface.get("description", ""),
+            "vlanid": iface.get("vlanid", None),
+            "parent_interface": iface.get("interface", ""),
+        })
+    return result
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
