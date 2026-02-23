@@ -183,5 +183,57 @@ def get_ipsec_tunnels(adom: str, device: str) -> list[dict]:
     return result
 
 
+@mcp.tool()
+def get_sdwan_health_checks(adom: str, device: str) -> list[dict]:
+    """Get live SD-WAN health check (SLA monitor) status for a FortiGate device.
+
+    Queries the FortiGate in real-time through FortiManager's proxy endpoint.
+    Returns the most recent latency, jitter, and packet loss measurement per
+    SD-WAN interface per health check — the primary way to assess overlay link
+    quality beyond simple tunnel up/down status.
+
+    Args:
+        adom: The ADOM name the device belongs to (e.g. 'fin-3001126209').
+        device: The device name as it appears in FortiManager (e.g. 'trv-sdwan-tre-lte').
+
+    Returns a list of health check entries, each with:
+        health_check (name), interface, link (up/down),
+        latency (ms), jitter (ms), packet_loss (%),
+        timestamp (Unix epoch of the measurement).
+        If no recent measurement is available, metrics are None.
+    """
+    raw = _fmg_execute("/sys/proxy/json", data={
+        "action": "get",
+        "resource": "/api/v2/monitor/virtual-wan/sla-log",
+        "target": [f"adom/{adom}/device/{device}"],
+    })
+
+    if not raw or not isinstance(raw, list):
+        return []
+
+    target_response = raw[0]
+    response = target_response.get("response") or {}
+    if response.get("status") == "error":
+        raise RuntimeError(
+            f"FortiGate proxy error for {device}: {response}"
+        )
+
+    results = response.get("results") or []
+    output = []
+    for entry in results:
+        logs = entry.get("logs") or []
+        latest = logs[-1] if logs else {}
+        output.append({
+            "health_check": entry.get("name", ""),
+            "interface": entry.get("interface", ""),
+            "link": latest.get("link", "no data"),
+            "latency": latest.get("latency"),
+            "jitter": latest.get("jitter"),
+            "packet_loss": latest.get("packetloss"),
+            "timestamp": latest.get("timestamp"),
+        })
+    return output
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
