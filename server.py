@@ -15,15 +15,18 @@ FMG_API_KEY = os.getenv("FMG_API_KEY")
 mcp = FastMCP("Fortinet FortiManager", host="0.0.0.0", port=8000)
 
 
-def _fmg_get(endpoint: str, retries: int = 3, retry_delay: float = 5.0) -> list:
+def _fmg_get(endpoint: str, retries: int = 3, retry_delay: float = 5.0, **params) -> list:
     """Connect to FortiManager, execute a GET request, return data.
+
+    Any additional keyword arguments (e.g. filter, fields, loadsub) are
+    forwarded to pyFMG's fmg.get() and merged into the JSON-RPC params.
 
     Retries up to `retries` times with `retry_delay` second intervals on
     status -11 ('No permission for the resource'), a known FortiManager bug.
     """
     for attempt in range(retries + 1):
         with FortiManager(FMG_HOST, apikey=FMG_API_KEY, verify_ssl=False) as fmg:
-            status, data = fmg.get(endpoint)
+            status, data = fmg.get(endpoint, **params)
         if status == 0:
             return data
         if status == -11 and attempt < retries:
@@ -73,6 +76,40 @@ def list_devices(adom: str) -> list[dict]:
         }
         for device in data
     ]
+
+
+@mcp.tool()
+def find_device(device_name: str) -> dict:
+    """Find a device across all ADOMs and return its details including ADOM membership.
+
+    Queries the global device table instead of iterating ADOM by ADOM,
+    making it much faster when there are many ADOMs.
+
+    Args:
+        device_name: The device name as it appears in FortiManager (e.g. 'FGT-BRANCH-01').
+
+    Returns a dict with:
+        name, serial, platform, conn_status, adom (the ADOM the device belongs to).
+        Returns an error dict if the device is not found.
+    """
+    data = _fmg_get(
+        "/dvmdb/device",
+        filter=[["name", "==", device_name]],
+        option=["extra info"],
+    )
+    if not data:
+        return {"error": f"Device '{device_name}' not found in any ADOM"}
+    device = data[0]
+    # ADOM is in "extra info" dict (confirmed on FMG 7.4, stable across 7.x)
+    extra = device.get("extra info") or {}
+    adom = extra.get("adom", "")
+    return {
+        "name": device.get("name", ""),
+        "serial": device.get("sn", ""),
+        "platform": device.get("platform_str", ""),
+        "conn_status": device.get("conn_status", ""),
+        "adom": adom,
+    }
 
 
 @mcp.tool()
