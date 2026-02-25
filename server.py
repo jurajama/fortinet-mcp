@@ -272,5 +272,55 @@ def get_sdwan_health_checks(adom: str, device: str) -> list[dict]:
     return output
 
 
+@mcp.tool()
+def get_bgp_neighbors(adom: str, device: str) -> list[dict]:
+    """Get live BGP neighbor/peer status for a FortiGate device via FortiManager proxy.
+
+    Queries the FortiGate in real-time through FortiManager's /sys/proxy/json
+    endpoint, which proxies to FortiOS REST API /api/v2/monitor/router/bgp/neighbors.
+    The device must be online and reachable from FortiManager.
+
+    Supports FortiGate running FortiOS 7.4 and 7.6.
+
+    Args:
+        adom: The ADOM name the device belongs to (e.g. 'fin-3001126209').
+        device: The device name as it appears in FortiManager (e.g. 'trv-sdwan-tre-lte').
+
+    Returns a list of BGP neighbors, each with:
+        neighbor_ip, remote_as, state (Established/Idle/Connect/Active/OpenSent/OpenConfirm),
+        admin_status (true/false), local_ip (local address used for peering),
+        type (ipv4/ipv6).
+    """
+    raw = _fmg_execute("/sys/proxy/json", data={
+        "action": "get",
+        "resource": "/api/v2/monitor/router/bgp/neighbors",
+        "target": [f"adom/{adom}/device/{device}"],
+    })
+
+    if not raw or not isinstance(raw, list):
+        return []
+
+    target_response = raw[0]
+    fgt_status = target_response.get("status", {}).get("code", -1)
+    if fgt_status != 0:
+        raise RuntimeError(
+            f"FortiGate proxy error (code {fgt_status}) for {device}: "
+            f"{target_response.get('status', {})}"
+        )
+
+    neighbors = (target_response.get("response") or {}).get("results") or []
+    result = []
+    for n in neighbors:
+        result.append({
+            "neighbor_ip": n.get("neighbor_ip", ""),
+            "remote_as": n.get("remote_as", 0),
+            "state": n.get("state", "unknown"),
+            "admin_status": n.get("admin_status", False),
+            "local_ip": n.get("local_ip", ""),
+            "type": n.get("type", ""),
+        })
+    return result
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
