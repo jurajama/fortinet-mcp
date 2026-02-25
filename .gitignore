@@ -1,4 +1,7 @@
 .env
 venv/
 __pycache__/
-.claude/
+.claude/projects/
+.claude/memory/
+.claude/cache/
+.claude/settings.local.json
