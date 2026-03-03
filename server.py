@@ -322,5 +322,55 @@ def get_bgp_neighbors(adom: str, device: str) -> list[dict]:
     return result
 
 
+@mcp.tool()
+def get_route_table(adom: str, device: str) -> list[dict]:
+    """Get the IPv4 routing table from a FortiGate device via FortiManager proxy.
+
+    Queries the FortiGate in real-time through FortiManager's /sys/proxy/json
+    endpoint, which proxies to FortiOS REST API /api/v2/monitor/router/ipv4.
+    The device must be online and reachable from FortiManager.
+
+    Args:
+        adom: The ADOM name the device belongs to (e.g. 'fin-3001126209').
+        device: The device name as it appears in FortiManager (e.g. 'trv400000001').
+
+    Returns a list of routes, each with:
+        type (connected/static/bgp/ospf/etc.), ip_mask (destination network/mask),
+        gateway (next-hop IP), interface (outgoing interface),
+        distance (administrative distance), metric (route metric),
+        is_best_route (boolean, whether this is the active/best route).
+    """
+    raw = _fmg_execute("/sys/proxy/json", data={
+        "action": "get",
+        "resource": "/api/v2/monitor/router/ipv4",
+        "target": [f"adom/{adom}/device/{device}"],
+    })
+
+    if not raw or not isinstance(raw, list):
+        return []
+
+    target_response = raw[0]
+    fgt_status = target_response.get("status", {}).get("code", -1)
+    if fgt_status != 0:
+        raise RuntimeError(
+            f"FortiGate proxy error (code {fgt_status}) for {device}: "
+            f"{target_response.get('status', {})}"
+        )
+
+    routes = (target_response.get("response") or {}).get("results") or []
+    result = []
+    for r in routes:
+        result.append({
+            "type": r.get("type", ""),
+            "ip_mask": r.get("ip_mask", ""),
+            "gateway": r.get("gateway", ""),
+            "interface": r.get("interface", ""),
+            "distance": r.get("distance", 0),
+            "metric": r.get("metric", 0),
+            "is_best_route": r.get("is_best_route", False),
+        })
+    return result
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
